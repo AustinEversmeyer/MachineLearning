@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ant build file that:
+    1) Builds the CMake-based BayesClassifier library
+    2) Compiles a small C++ app that links to it
+    3) Stages the model config for runtime
+    4) Runs the demo
+-->
+<project name="ant-bayes-live" default="run" basedir=".">
+    <!-- Load user-configurable paths like model.path and output.path -->
+    <property file="${basedir}/build.properties"/>
+    <!-- Root path to the CMake-based BayesClassifier project -->
+    <property name="bayes.dir" value="${basedir}/../BayesClassifier"/>
+    <!-- CMake build directory for the BayesClassifier library -->
+    <property name="bayes.build.dir" value="${basedir}/build/bayes"/>
+    <!-- Output static library name produced by CMake -->
+    <property name="bayes.lib.name" value="libnaive_bayes_core.a"/>
+    <!-- App source directory -->
+    <property name="app.src.dir" value="${basedir}/app/src"/>
+    <!-- App build output directory -->
+    <property name="app.build.dir" value="${basedir}/app/build"/>
+    <!-- App include directory -->
+    <property name="app.include.dir" value="${basedir}/app/include"/>
+    <!-- App output binary path -->
+    <property name="app.bin" value="${app.build.dir}/app"/>
+    <!-- Staged config directory copied from BayesClassifier -->
+    <property name="app.config.dir" value="${app.build.dir}/config"/>
+
+    <target name="init">
+        <!-- Ensure all build/staging directories exist -->
+        <mkdir dir="${bayes.build.dir}"/>
+        <mkdir dir="${app.build.dir}"/>
+        <mkdir dir="${app.config.dir}"/>
+    </target>
+
+    <target name="lib" depends="init" description="Configure and build the BayesClassifier library">
+        <!-- CMake configure step for BayesClassifier -->
+        <exec executable="cmake" failonerror="true">
+            <!-- -S sets the source directory for CMakeLists.txt -->
+            <arg value="-S"/>
+            <arg value="${bayes.dir}"/>
+            <!-- -B sets the out-of-tree build directory -->
+            <arg value="-B"/>
+            <arg value="${bayes.build.dir}"/>
+            <!-- -D sets a CMake cache variable (Release enables optimized builds) -->
+            <arg value="-DCMAKE_BUILD_TYPE=Release"/>
+        </exec>
+        <!-- CMake build step for BayesClassifier -->
+        <exec executable="cmake" failonerror="true">
+            <!-- build tells CMake to build the generated build directory -->
+            <arg value="--build"/>
+            <arg value="${bayes.build.dir}"/>
+            <!-- config selects the build configuration for multi-config generators -->
+            <arg value="--config"/>
+            <arg value="Release"/>
+        </exec>
+    </target>
+
+    <target name="stage" depends="init" description="Stage BayesClassifier config files">
+        <!-- Copy BayesClassifier config files into the app's build output -->
+        <copy todir="${app.config.dir}" overwrite="true">
+            <fileset dir="${bayes.dir}/config"/>
+        </copy>
+    </target>
+
+    <target name="compile" depends="lib,stage" description="Compile and link the demo app">
+        <!-- Compile BayesClassifier pipeline helpers used for live inference -->
+        <exec executable="g++" failonerror="true">
+            <!-- -std=c++17 enables C++17 language features -->
+            <arg value="-std=c++17"/>
+            <!-- -I adds include search paths for headers -->
+            <arg value="-I"/>
+            <arg value="${bayes.dir}/include"/>
+            <!-- -I adds include search paths for local app headers -->
+            <arg value="-I"/>
+            <arg value="${app.include.dir}"/>
+            <!-- -D defines compile-time macros used by the demo for paths -->
+            <arg value="-DANT_BAYES_MODEL_PATH=&quot;${model.path}&quot;"/>
+            <arg value="-DANT_BAYES_OUTPUT_PATH=&quot;${output.path}&quot;"/>
+            <!-- -c compiles to an object file without linking -->
+            <arg value="-c"/>
+            <arg value="${bayes.dir}/src/pipeline/pipeline_helpers.cpp"/>
+            <!-- -o selects the object output path -->
+            <arg value="-o"/>
+            <arg value="${app.build.dir}/pipeline_helpers.o"/>
+        </exec>
+
+        <!-- Compile BayesClassifier CSV writer used to emit predictions.csv -->
+        <exec executable="g++" failonerror="true">
+            <!-- -std=c++17 enables C++17 language features -->
+            <arg value="-std=c++17"/>
+            <!-- -I adds include search paths for headers -->
+            <arg value="-I"/>
+            <arg value="${bayes.dir}/include"/>
+            <!-- -I adds include search paths for local app headers -->
+            <arg value="-I"/>
+            <arg value="${app.include.dir}"/>
+            <!-- -D defines compile-time macros used by the demo for paths -->
+            <arg value="-DANT_BAYES_MODEL_PATH=&quot;${model.path}&quot;"/>
+            <arg value="-DANT_BAYES_OUTPUT_PATH=&quot;${output.path}&quot;"/>
+            <!-- -c compiles to an object file without linking -->
+            <arg value="-c"/>
+            <arg value="${bayes.dir}/src/io/output_write.cpp"/>
+            <!-- -o selects the object output path -->
+            <arg value="-o"/>
+            <arg value="${app.build.dir}/output_write.o"/>
+        </exec>
+
+        <!-- Compile the app entry point -->
+        <exec executable="g++" failonerror="true">
+            <!-- -std=c++17 enables C++17 language features -->
+            <arg value="-std=c++17"/>
+            <!-- -I adds include search paths for headers -->
+            <arg value="-I"/>
+            <arg value="${bayes.dir}/include"/>
+            <!-- -I adds include search paths for local app headers -->
+            <arg value="-I"/>
+            <arg value="${app.include.dir}"/>
+            <!-- -D defines compile-time macros used by the demo for paths -->
+            <arg value="-DANT_BAYES_MODEL_PATH=&quot;${model.path}&quot;"/>
+            <arg value="-DANT_BAYES_OUTPUT_PATH=&quot;${output.path}&quot;"/>
+            <!-- -c compiles to an object file without linking -->
+            <arg value="-c"/>
+            <arg value="${app.src.dir}/main.cpp"/>
+            <!-- -o selects the object output path -->
+            <arg value="-o"/>
+            <arg value="${app.build.dir}/main.o"/>
+        </exec>
+
+        <!-- Compile the demo implementation -->
+        <exec executable="g++" failonerror="true">
+            <!-- -std=c++17 enables C++17 language features -->
+            <arg value="-std=c++17"/>
+            <!-- -I adds include search paths for headers -->
+            <arg value="-I"/>
+            <arg value="${bayes.dir}/include"/>
+            <!-- -I adds include search paths for local app headers -->
+            <arg value="-I"/>
+            <arg value="${app.include.dir}"/>
+            <!-- -D defines compile-time macros used by the demo for paths -->
+            <arg value="-DANT_BAYES_MODEL_PATH=&quot;${model.path}&quot;"/>
+            <arg value="-DANT_BAYES_OUTPUT_PATH=&quot;${output.path}&quot;"/>
+            <!-- -c compiles to an object file without linking -->
+            <arg value="-c"/>
+            <arg value="${app.src.dir}/ant_bayes_live.cpp"/>
+            <!-- -o selects the object output path -->
+            <arg value="-o"/>
+            <arg value="${app.build.dir}/ant_bayes_live.o"/>
+        </exec>
+
+        <!-- Link the app against BayesClassifier core plus helper objects -->
+        <exec executable="g++" failonerror="true">
+            <!-- -std=c++17 ensures consistent standard during link step -->
+            <arg value="-std=c++17"/>
+            <arg value="${app.build.dir}/main.o"/>
+            <arg value="${app.build.dir}/ant_bayes_live.o"/>
+            <arg value="${app.build.dir}/pipeline_helpers.o"/>
+            <arg value="${app.build.dir}/output_write.o"/>
+            <!-- -L adds a library search path for the linker -->
+            <arg value="-L"/>
+            <arg value="${bayes.build.dir}"/>
+            <!-- -l links against libnaive_bayes_core.a -->
+            <arg value="-lnaive_bayes_core"/>
+            <!-- -o sets the final binary output path -->
+            <arg value="-o"/>
+            <arg value="${app.bin}"/>
+        </exec>
+    </target>
+
+    <target name="run" depends="compile" description="Run the demo app">
+        <!-- Execute the compiled app binary -->
+        <exec executable="${app.bin}" failonerror="true"/>
+    </target>
+
+    <target name="build" depends="compile" description="Build the demo app"/>
+
+    <target name="clean" description="Clean build outputs">
+        <!-- Remove generated artifacts for a clean rebuild -->
+        <delete dir="${app.build.dir}"/>
+        <delete dir="${bayes.build.dir}"/>
+    </target>
+</project>
