@@ -46,7 +46,7 @@ from tools.scripts.plot_feature_pdfs import plot_feature_pdfs
 
 # ---------- Editable defaults  ----------
 DEFAULT_CSV_PATH = str(
-    (ROOT_DIR.parent / "main_app" / "source_lib" / "bayes_classifier_output.csv").resolve()
+    (ROOT_DIR.parent / "main_app" / "source_lib" / "deps" / "BayesPipeline" / "config" / "runtime" / "bayes_classifier_output.csv").resolve()
 )
 DEFAULT_TRUTH_COLUMN = "truth_label"
 DEFAULT_PRED_COLUMN = "predicted_class"
@@ -55,10 +55,14 @@ DEFAULT_OUTPUT_DIR = "analysis_outputs_runtime"
 DEFAULT_SHOW = True
 DEFAULT_CRITICAL_CLASSES: list[str] = ["TargetSmall"]
 DEFAULT_CAST_LABELS_TO_CATEGORY = True  # set False if you prefer to keep original dtypes
-DEFAULT_PDF_PLOTS = False
-DEFAULT_PDF_MODEL_CONFIG = "tools/outputs/wine_model.configuration.json"
-DEFAULT_PDF_INFERENCE_CONFIG = "tools/outputs/wine_inference_config.json"
-DEFAULT_PDF_OUTPUT_DIR = "analysis_outputs/pdfs"
+DEFAULT_PDF_PLOTS = True
+DEFAULT_PDF_MODEL_CONFIG = str(
+    (ROOT_DIR.parent / "main_app" / "source_lib" / "deps" / "BayesPipeline" / "config" / "model" / "implementation.model.json").resolve()
+)
+DEFAULT_PDF_SOURCE_CSV = DEFAULT_CSV_PATH
+DEFAULT_PDF_LABEL_PRIORITY: list[str] = ["truth_label", "predicted_class"]
+DEFAULT_PDF_FEATURE_PREFIX = "feature_"
+DEFAULT_PDF_OUTPUT_DIR = "analysis_outputs_runtime/pdfs"
 DEFAULT_PDF_BINS = 30
 # ----------------------------------------------------------------
 
@@ -268,7 +272,9 @@ def main() -> None:
     critical_classes = DEFAULT_CRITICAL_CLASSES
     pdf_plots = DEFAULT_PDF_PLOTS
     pdf_model_config = DEFAULT_PDF_MODEL_CONFIG
-    pdf_inference_config = DEFAULT_PDF_INFERENCE_CONFIG
+    pdf_source_csv = DEFAULT_PDF_SOURCE_CSV
+    pdf_label_priority = DEFAULT_PDF_LABEL_PRIORITY
+    pdf_feature_prefix = DEFAULT_PDF_FEATURE_PREFIX
     pdf_output_dir = DEFAULT_PDF_OUTPUT_DIR
     pdf_bins = DEFAULT_PDF_BINS
 
@@ -452,14 +458,16 @@ def main() -> None:
             print(f"  {key}: {value}")
 
     if pdf_plots:
-        if not pdf_inference_config:
-            raise ValueError("DEFAULT_PDF_INFERENCE_CONFIG must be set to enable PDF plots.")
+        if not pdf_source_csv:
+            raise ValueError("DEFAULT_PDF_SOURCE_CSV must be set to enable PDF plots.")
         log("Generating PDF plots ...")
         plot_feature_pdfs(
             model_config=pdf_model_config,
-            inference_config=pdf_inference_config,
+            source_csv=pdf_source_csv,
             output_dir=pdf_output_dir,
             bins=pdf_bins,
+            label_priority=pdf_label_priority,
+            feature_prefix=pdf_feature_prefix,
         )
 
     print(f"\nSaved confusion matrix plot: {confusion_path}")

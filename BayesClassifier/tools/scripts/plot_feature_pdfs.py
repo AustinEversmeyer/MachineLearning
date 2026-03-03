@@ -6,68 +6,14 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 MODEL_CONFIG = ""
-INFERENCE_CONFIG = "config/classifier/inference.batch_text.example.json"
+SOURCE_CSV = ""
 OUTPUT_DIR = "output/pdfs"
 BINS = 30
-
-def resolve_path(base_dir: Path, path_value: str, root_dir: Path | None = None) -> Path:
-    path = Path(path_value)
-    if not path.is_absolute():
-        if root_dir is not None:
-            root_candidate = root_dir / path_value
-            if root_candidate.exists():
-                path = root_candidate
-            else:
-                path = base_dir / path
-        else:
-            path = base_dir / path
-    return path.resolve()
-
-
-def parse_delimiter(token: str) -> str:
-    if token == "SPACE":
-        return " "
-    if token == "TAB":
-        return "\t"
-    if len(token) == 1:
-        return token
-    raise ValueError(f"Invalid delimiter specification: {token}")
-
-
-def tokenize(line: str, delimiter: str) -> list[str]:
-    if delimiter in (" ", "\t"):
-        return line.split()
-    return [token.strip() for token in line.split(delimiter)]
-
-
-def load_inference_config(config_path: Path) -> dict:
-    with config_path.open("r", encoding="utf-8") as handle:
-        data = json.load(handle)
-
-    input_format = data.get("input_format", "text")
-    if input_format != "text":
-        raise ValueError("This tool currently supports text input only.")
-
-    layout = data.get("layout", {})
-    feature_fields = layout.get("feature_fields")
-    if not feature_fields:
-        raise ValueError("layout.feature_fields must be provided for text input.")
-
-    delimiter_token = layout.get("delimiter", "SPACE")
-    config_dir = config_path.parent
-    input_file = data.get("input_file")
-    if not input_file:
-        raise ValueError("input_file must be set in the inference config.")
-
-    return {
-        "input_file": resolve_path(config_dir, input_file),
-        "truth_field": layout.get("truth_field", "truth"),
-        "feature_fields": feature_fields,
-        "delimiter": parse_delimiter(delimiter_token),
-        "model_config": data.get("model_config"),
-    }
+LABEL_PRIORITY = ["truth_label", "predicted_class"]
+FEATURE_PREFIX = "feature_"
 
 
 def load_model_config(model_path: Path) -> dict:
@@ -103,62 +49,77 @@ def load_model_config(model_path: Path) -> dict:
     return {"feature_names": feature_names, "classes": class_models}
 
 
-def read_text_input(input_path: Path,
-                    truth_field: str,
-                    feature_fields: list[str],
-                    delimiter: str) -> dict:
+def load_prediction_csv(source_csv_path: Path) -> pd.DataFrame:
+    if not source_csv_path.exists():
+        raise FileNotFoundError(f"Prediction CSV not found: {source_csv_path}")
+    return pd.read_csv(source_csv_path)
+
+
+def _is_missing_label(value: object) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    return text.lower() in {"nan", "none", "null", "na", "n/a"}
+
+
+def select_label_column(df: pd.DataFrame, label_priority: list[str]) -> str:
+    for candidate in label_priority:
+        if candidate not in df.columns:
+            continue
+        valid_count = int((~df[candidate].map(_is_missing_label)).sum())
+        if valid_count > 0:
+            return candidate
+    raise ValueError(
+        "No usable label column found. Checked: "
+        + ", ".join(label_priority)
+        + ". Ensure truth_label or predicted_class has non-empty values."
+    )
+
+
+def extract_feature_columns(
+    df: pd.DataFrame, feature_prefix: str
+) -> tuple[dict[str, str], list[str]]:
+    mapping: dict[str, str] = {}
+    extras: list[str] = []
+
+    for column in df.columns:
+        if not column.startswith(feature_prefix):
+            continue
+        feature_name = column[len(feature_prefix) :]
+        if not feature_name:
+            extras.append(column)
+            continue
+        mapping[feature_name] = column
+
+    return mapping, extras
+
+
+def group_csv_data_by_label(
+    df: pd.DataFrame,
+    label_col: str,
+    model_feature_names: list[str],
+    feature_to_column: dict[str, str],
+) -> dict[str, list[list[float]]]:
     data_by_class: dict[str, list[list[float]]] = {}
 
-    with input_path.open("r", encoding="utf-8") as handle:
-        header_tokens = None
-        for line in handle:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
+    for _, row in df.iterrows():
+        label_raw = row.get(label_col)
+        if _is_missing_label(label_raw):
+            continue
+        class_name = str(label_raw).strip()
+
+        if class_name not in data_by_class:
+            data_by_class[class_name] = [[] for _ in model_feature_names]
+
+        for feature_index, feature_name in enumerate(model_feature_names):
+            column = feature_to_column.get(feature_name)
+            if column is None:
                 continue
-            header_tokens = tokenize(stripped, delimiter)
-            break
-
-        if header_tokens is None:
-            raise ValueError("Input file has no header row.")
-
-        header_index = {name: idx for idx, name in enumerate(header_tokens)}
-        if truth_field not in header_index:
-            raise ValueError(f"Missing truth field '{truth_field}' in header.")
-
-        feature_indices = []
-        for name in feature_fields:
-            if name not in header_index:
-                raise ValueError(f"Missing feature '{name}' in header.")
-            feature_indices.append(header_index[name])
-
-        truth_index = header_index[truth_field]
-
-        for line in handle:
-            content = line.split("#", 1)[0].strip()
-            if not content:
-                continue
-            tokens = tokenize(content, delimiter)
-            if truth_index >= len(tokens):
-                continue
-            class_name = tokens[truth_index].strip()
-            if not class_name:
-                continue
-
-            if class_name not in data_by_class:
-                data_by_class[class_name] = [[] for _ in feature_fields]
-
-            for idx, token_index in enumerate(feature_indices):
-                if token_index >= len(tokens):
-                    continue
-                token = tokens[token_index].strip()
-                if not token:
-                    continue
-                try:
-                    value = float(token)
-                except ValueError:
-                    continue
-                if math.isfinite(value):
-                    data_by_class[class_name][idx].append(value)
+            value = pd.to_numeric(row.get(column), errors="coerce")
+            if pd.notna(value) and math.isfinite(float(value)):
+                data_by_class[class_name][feature_index].append(float(value))
 
     return data_by_class
 
@@ -178,34 +139,68 @@ def sanitize_filename(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
 
 
-def plot_feature_pdfs(model_config: str,
-                      inference_config: str,
-                      output_dir: str = "output/pdfs",
-                      bins: int = 30) -> None:
-    root_dir = Path(__file__).resolve().parents[2]
-    inference_path = Path(inference_config).resolve()
-    output_dir = Path(output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    inference = load_inference_config(inference_path)
-    model_config_value = model_config or inference.get("model_config")
-    if not model_config_value:
+def plot_feature_pdfs(
+    model_config: str,
+    source_csv: str,
+    output_dir: str = "output/pdfs",
+    bins: int = 30,
+    label_priority: list[str] | None = None,
+    feature_prefix: str = "feature_",
+) -> None:
+    if not model_config:
         raise ValueError("model_config must be provided.")
-    model_path = resolve_path(inference_path.parent, model_config_value, root_dir=root_dir)
-    model = load_model_config(model_path)
-    data_by_class = read_text_input(
-        inference["input_file"],
-        inference["truth_field"],
-        inference["feature_fields"],
-        inference["delimiter"],
-    )
+    if not source_csv:
+        raise ValueError("source_csv must be provided.")
 
-    feature_names = model["feature_names"]
+    model_path = Path(model_config).resolve()
+    source_csv_path = Path(source_csv).resolve()
+    output_dir_path = Path(output_dir).resolve()
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+
+    model = load_model_config(model_path)
+    df = load_prediction_csv(source_csv_path)
+    priorities = label_priority or ["truth_label", "predicted_class"]
+    label_col = select_label_column(df, priorities)
+
+    feature_to_column, malformed_feature_cols = extract_feature_columns(df, feature_prefix)
+    if malformed_feature_cols:
+        print(
+            "Warning: ignoring malformed feature columns: "
+            + ", ".join(sorted(malformed_feature_cols))
+        )
+
+    model_feature_names = model["feature_names"]
     classes = model["classes"]
 
-    for feature_index, feature_name in enumerate(feature_names):
+    missing_model_features = [name for name in model_feature_names if name not in feature_to_column]
+    if missing_model_features:
+        print(
+            "Warning: source CSV missing model feature columns: "
+            + ", ".join(f"{feature_prefix}{name}" for name in missing_model_features)
+            + ". Plots for those features will be skipped."
+        )
+
+    extra_csv_features = sorted(name for name in feature_to_column if name not in set(model_feature_names))
+    if extra_csv_features:
+        print(
+            "Warning: source CSV has extra feature columns not in model: "
+            + ", ".join(f"{feature_prefix}{name}" for name in extra_csv_features)
+            + ". They will be ignored."
+        )
+
+    data_by_class = group_csv_data_by_label(
+        df=df,
+        label_col=label_col,
+        model_feature_names=model_feature_names,
+        feature_to_column=feature_to_column,
+    )
+
+    for feature_index, feature_name in enumerate(model_feature_names):
+        if feature_name not in feature_to_column:
+            continue
+
         data_values = []
-        for class_name, per_feature in data_by_class.items():
+        for _, per_feature in data_by_class.items():
             if feature_index < len(per_feature):
                 data_values.extend(per_feature[feature_index])
 
@@ -262,12 +257,26 @@ def plot_feature_pdfs(model_config: str,
             if dist_type == "gaussian":
                 mean = float(params.get("mean", 0.0))
                 sigma = float(params.get("sigma", 1.0))
-                y_values = gaussian_pdf(x_values, mean, sigma)
-                ax.plot(x_values, y_values, color=color, label=f"{label_prefix} PDF")
+                if sigma <= 0.0:
+                    print(
+                        f"Warning: skipping gaussian PDF for class '{label_prefix}', feature '{feature_name}' due to non-positive sigma"
+                    )
+                else:
+                    y_values = gaussian_pdf(x_values, mean, sigma)
+                    ax.plot(x_values, y_values, color=color, label=f"{label_prefix} PDF")
             elif dist_type == "rayleigh":
                 sigma = float(params.get("sigma", 1.0))
-                y_values = rayleigh_pdf(x_values, sigma)
-                ax.plot(x_values, y_values, color=color, label=f"{label_prefix} PDF")
+                if sigma <= 0.0:
+                    print(
+                        f"Warning: skipping rayleigh PDF for class '{label_prefix}', feature '{feature_name}' due to non-positive sigma"
+                    )
+                else:
+                    y_values = rayleigh_pdf(x_values, sigma)
+                    ax.plot(x_values, y_values, color=color, label=f"{label_prefix} PDF")
+            else:
+                print(
+                    f"Warning: unsupported distribution '{dist_type}' for class '{label_prefix}', feature '{feature_name}'. Skipping PDF curve."
+                )
 
             if cls["name"] in data_by_class:
                 samples = data_by_class[cls["name"]][feature_index]
@@ -281,7 +290,7 @@ def plot_feature_pdfs(model_config: str,
                         label=f"{label_prefix} data",
                     )
 
-        ax.set_title(f"Feature '{feature_name}': PDFs vs data")
+        ax.set_title(f"Feature '{feature_name}': PDFs vs data ({label_col})")
         ax.set_xlabel(feature_name)
         ax.set_ylabel("Density")
         ax.legend()
@@ -289,16 +298,18 @@ def plot_feature_pdfs(model_config: str,
 
         filename = f"pdf_{sanitize_filename(feature_name)}.png"
         fig.tight_layout()
-        fig.savefig(output_dir / filename, dpi=150)
+        fig.savefig(output_dir_path / filename, dpi=150)
         plt.close(fig)
 
-    print(f"Wrote plots to {output_dir}")
+    print(f"Wrote plots to {output_dir_path}")
 
 
 if __name__ == "__main__":
     plot_feature_pdfs(
         model_config=MODEL_CONFIG,
-        inference_config=INFERENCE_CONFIG,
+        source_csv=SOURCE_CSV,
         output_dir=OUTPUT_DIR,
         bins=BINS,
+        label_priority=LABEL_PRIORITY,
+        feature_prefix=FEATURE_PREFIX,
     )
