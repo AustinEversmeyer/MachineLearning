@@ -1,12 +1,12 @@
 #include "MessageSimulator.h"
 
-#include "io/json.h"
+#include "io/model_loader.h"
+#include "naive_bayes/naive_bayes.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <fstream>
-#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -65,75 +65,49 @@ std::optional<std::string> TruthForId(int id, const SyntheticParams& params) {
 
 struct ClassProfile {
     std::string label;
-    double rcs_mean = 0.0;
-    double rcs_sigma = 1.0;
-    double length_mean = 0.0;
-    double length_sigma = 1.0;
+    std::size_t class_index = 0;
 };
 
-std::vector<ClassProfile> LoadClassProfiles(const std::filesystem::path& model_config_path) {
-    std::ifstream model_input(model_config_path);
-    if (!model_input) {
-        throw std::runtime_error("Failed to open model config for synthetic generation: " +
-                                 model_config_path.string());
-    }
-
-    naive_bayes::io::Json root = naive_bayes::io::Json::parse(model_input);
-    if (!root.is_object() || !root.contains("classes") || !root.at("classes").is_array()) {
-        throw std::runtime_error("Model config must contain a 'classes' array for synthetic generation");
-    }
-
+struct ModelDrivenProfiles {
+    naive_bayes::NaiveBayes model;
     std::vector<ClassProfile> profiles;
-    for (const naive_bayes::io::Json& class_json : root.at("classes").as_array()) {
-        if (!class_json.is_object() || !class_json.contains("name") || !class_json.at("name").is_string() ||
-            !class_json.contains("features") || !class_json.at("features").is_array()) {
-            throw std::runtime_error("Invalid class entry in model config");
-        }
+};
 
+ModelDrivenProfiles LoadClassProfiles(const std::filesystem::path& model_config_path) {
+    ModelDrivenProfiles result{
+        naive_bayes::io::LoadModelConfiguration(model_config_path),
+        {}
+    };
+    const naive_bayes::NaiveBayes& model = result.model;
+    const std::vector<naive_bayes::ClassModelInfo> class_models = model.ClassModels();
+    result.profiles.reserve(class_models.size());
+    for (std::size_t class_index = 0; class_index < class_models.size(); ++class_index) {
+        const naive_bayes::ClassModelInfo& class_model = class_models[class_index];
         ClassProfile profile;
-        profile.label = class_json.at("name").get<std::string>();
+        profile.label = class_model.name;
+        profile.class_index = class_index;
 
-        std::map<std::string, std::pair<double, double>> feature_params;
-        for (const naive_bayes::io::Json& feature_json : class_json.at("features").as_array()) {
-            if (!feature_json.is_object() ||
-                !feature_json.contains("name") || !feature_json.at("name").is_string() ||
-                !feature_json.contains("type") || !feature_json.at("type").is_string() ||
-                !feature_json.contains("params") || !feature_json.at("params").is_object()) {
-                throw std::runtime_error("Invalid feature entry in model config");
+        bool has_rcs = false;
+        bool has_length = false;
+        for (const naive_bayes::FeatureModelInfo& feature_model : class_model.features) {
+            if (feature_model.name == "rcs") {
+                has_rcs = true;
+            } else if (feature_model.name == "length") {
+                has_length = true;
             }
-
-            const std::string feature_name = feature_json.at("name").get<std::string>();
-            const std::string feature_type = feature_json.at("type").get<std::string>();
-            if (feature_type != "gaussian") {
-                continue;
-            }
-            const naive_bayes::io::Json& params = feature_json.at("params");
-            if (!params.contains("mean") || !params.at("mean").is_number() ||
-                !params.contains("sigma") || !params.at("sigma").is_number()) {
-                throw std::runtime_error("Gaussian feature '" + feature_name +
-                                         "' missing numeric mean/sigma in model config");
-            }
-            feature_params[feature_name] = {params.at("mean").get<double>(), params.at("sigma").get<double>()};
         }
-
-        auto rcs_it = feature_params.find("rcs");
-        auto len_it = feature_params.find("length");
-        if (rcs_it == feature_params.end() || len_it == feature_params.end()) {
+        if (!has_rcs || !has_length) {
             throw std::runtime_error("Class '" + profile.label +
-                                     "' missing gaussian 'rcs' or 'length' feature params");
+                                     "' missing required simulator features 'rcs' or 'length'");
         }
-        profile.rcs_mean = rcs_it->second.first;
-        profile.rcs_sigma = rcs_it->second.second;
-        profile.length_mean = len_it->second.first;
-        profile.length_sigma = len_it->second.second;
-        profiles.push_back(std::move(profile));
+        result.profiles.push_back(std::move(profile));
     }
 
-    if (profiles.empty()) {
+    if (result.profiles.empty()) {
         throw std::runtime_error("No usable class profiles found in model config: " +
                                  model_config_path.string());
     }
-    return profiles;
+    return result;
 }
 
 }  // namespace
@@ -181,7 +155,7 @@ void MessageSimulator::GenerateSynthetic(int num_ids, int num_steps,
                                          double proc1_time_step,
                                          double proc2_time_step,
                                          SyntheticParams params) {
-    std::optional<std::vector<ClassProfile>> class_profiles = std::nullopt;
+    std::optional<ModelDrivenProfiles> class_profiles = std::nullopt;
     if (params.model_config_path.has_value()) {
         class_profiles = LoadClassProfiles(*params.model_config_path);
     }
@@ -198,10 +172,11 @@ void MessageSimulator::GenerateSynthetic(int num_ids, int num_steps,
         const double t = step * proc1_time_step;
         for (int id = 0; id < num_ids; ++id) {
             if (class_profiles.has_value()) {
-                const std::vector<ClassProfile>& profiles = *class_profiles;
+                const std::vector<ClassProfile>& profiles = class_profiles->profiles;
                 const ClassProfile& profile = profiles[static_cast<std::size_t>(id) % profiles.size()];
-                std::normal_distribution<double> class_rcs_dist(profile.rcs_mean, profile.rcs_sigma);
-                new_messages.push_back(Proc1Message{id, t, class_rcs_dist(rng_), profile.label});
+                const double rcs_value =
+                    class_profiles->model.SampleFeatureForClass(profile.class_index, "rcs", rng_);
+                new_messages.push_back(Proc1Message{id, t, rcs_value, profile.label});
             } else {
                 new_messages.push_back(Proc1Message{id, t, rcs_dist_(rng_), TruthForId(id, params)});
             }
@@ -215,11 +190,12 @@ void MessageSimulator::GenerateSynthetic(int num_ids, int num_steps,
         const double t = step * proc2_time_step;
         for (int id = 0; id < num_ids; ++id) {
             if (class_profiles.has_value()) {
-                const std::vector<ClassProfile>& profiles = *class_profiles;
+                const std::vector<ClassProfile>& profiles = class_profiles->profiles;
                 const ClassProfile& profile = profiles[static_cast<std::size_t>(id) % profiles.size()];
-                std::normal_distribution<double> class_len_dist(profile.length_mean, profile.length_sigma);
+                const double length_value =
+                    class_profiles->model.SampleFeatureForClass(profile.class_index, "length", rng_);
                 new_messages.push_back(
-                    Proc2Message{id, t + jitter_dist_(rng_), class_len_dist(rng_), profile.label});
+                    Proc2Message{id, t + jitter_dist_(rng_), length_value, profile.label});
             } else {
                 new_messages.push_back(
                     Proc2Message{id, t + jitter_dist_(rng_), len_dist_(rng_), TruthForId(id, params)});

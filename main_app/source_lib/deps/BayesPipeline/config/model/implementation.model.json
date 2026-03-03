@@ -10,7 +10,7 @@
       "prior": 0.33,
       "features": [
         { "name": "rcs",    "type": "gaussian", "params": { "mean": 2.0, "sigma": 0.8 } },
-        { "name": "length", "type": "gaussian", "params": { "mean": 1.5, "sigma": 0.5 } }
+        { "name": "length", "type": "rayleigh", "params": { "sigma": 0.5 } }
       ]
     },
     {
@@ -18,7 +18,7 @@
       "prior": 0.34,
       "features": [
         { "name": "rcs",    "type": "gaussian", "params": { "mean": 5.0, "sigma": 1.5 } },
-        { "name": "length", "type": "gaussian", "params": { "mean": 3.0, "sigma": 0.8 } }
+        { "name": "length", "type": "rayleigh", "params": { "sigma": 0.8 } }
       ]
     },
     {
@@ -26,7 +26,7 @@
       "prior": 0.33,
       "features": [
         { "name": "rcs",    "type": "gaussian", "params": { "mean": 9.0, "sigma": 2.0 } },
-        { "name": "length", "type": "gaussian", "params": { "mean": 6.0, "sigma": 1.2 } }
+        { "name": "length", "type": "rayleigh", "params": { "sigma": 1.2 } }
       ]
     }
   ]

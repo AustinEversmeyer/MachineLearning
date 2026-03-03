@@ -63,8 +63,11 @@ public:
 
     std::vector<JoinedFeatureVector> BuildJoinedFeatureVectors(bool allow_partial = false) const;
 
+    // Legacy trigger-based API retained for backward compatibility.
+    // Runtime path uses EvaluationPolicy/PartialPolicy in BayesClassifierManager.
     bool ShouldClassify(ClassificationTrigger trigger) const;
 
+    // Legacy companion API retained for backward compatibility.
     void ResetUpdatedFeatures();
 
     const std::string& PrimaryFeatureName() const;

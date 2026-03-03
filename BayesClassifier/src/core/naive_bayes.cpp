@@ -232,4 +232,48 @@ const std::vector<std::string>& NaiveBayes::FeatureNames() const {
   return classes_[0].feature_names;
 }
 
+std::vector<ClassModelInfo> NaiveBayes::ClassModels() const {
+  std::vector<ClassModelInfo> models;
+  models.reserve(classes_.size());
+  for (const ClassDefinition& class_def : classes_) {
+    ClassModelInfo info;
+    info.name = class_def.name;
+    info.prior = class_def.prior;
+    info.features.reserve(class_def.feature_models.size());
+    for (std::size_t i = 0; i < class_def.feature_models.size(); ++i) {
+      const std::unique_ptr<FeatureDistribution>& dist = class_def.feature_models[i];
+      if (!dist) {
+        continue;
+      }
+      FeatureModelInfo feature_info;
+      feature_info.name = class_def.feature_names[i];
+      feature_info.distribution_type = dist->TypeName();
+      feature_info.params = dist->Params();
+      info.features.push_back(std::move(feature_info));
+    }
+    models.push_back(std::move(info));
+  }
+  return models;
+}
+
+double NaiveBayes::SampleFeatureForClass(std::size_t class_index,
+                                         const std::string& feature_name,
+                                         std::mt19937& rng) const {
+  if (class_index >= classes_.size()) {
+    throw std::out_of_range("class_index out of range in SampleFeatureForClass");
+  }
+  const ClassDefinition& class_def = classes_[class_index];
+  for (std::size_t i = 0; i < class_def.feature_names.size(); ++i) {
+    if (class_def.feature_names[i] != feature_name) {
+      continue;
+    }
+    const std::unique_ptr<FeatureDistribution>& dist = class_def.feature_models[i];
+    if (!dist) {
+      throw std::runtime_error("Class '" + class_def.name + "' does not model feature '" + feature_name + "'");
+    }
+    return dist->Sample(rng);
+  }
+  throw std::runtime_error("Class '" + class_def.name + "' missing feature '" + feature_name + "'");
+}
+
 }  // namespace naive_bayes

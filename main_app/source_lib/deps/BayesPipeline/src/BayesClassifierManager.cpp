@@ -1,6 +1,7 @@
 #include "BayesClassifierManager.h"
 
 #include "io/model_loader.h"   // naive_bayes::io::LoadModelConfiguration()
+#include "pipeline/prediction_helpers.h"
 
 #include <algorithm>
 #include <iostream>
@@ -157,35 +158,22 @@ std::vector<ClassificationResult> BayesClassifierManager::Classify() {
             features.push_back(value_it->second);
         }
 
-        const std::pair<std::string, double> prediction = bayesClassifier_->PredictClass(features);
-
-        std::vector<std::pair<std::string, double>> posteriors =
-            bayesClassifier_->PredictPosteriors(features);
+        const naive_bayes::pipeline::DetailedPrediction prediction =
+            naive_bayes::pipeline::RunDetailedPrediction(*bayesClassifier_, features);
 
         ClassificationResult result;
         result.id = rec.id;
         result.time_ns = rec.anchor_time_ns;
         result.truth_label = rec.truth_label;
         result.classification_state = classification_state;
-        result.feature_inputs.reserve(feature_names.size());
-        for (std::size_t i = 0; i < feature_names.size(); ++i) {
-            result.feature_inputs.emplace_back(feature_names[i], features[i]);
-        }
-        result.predicted_class = prediction.first;
-        result.predicted_prob = prediction.second;
-        result.posteriors = std::move(posteriors);
+        result.feature_inputs = naive_bayes::pipeline::BuildFeatureInputs(feature_names, features);
+        result.predicted_class = prediction.predicted_class;
+        result.predicted_prob = prediction.predicted_prob;
+        result.posteriors = prediction.probabilities;
         result.is_partial = (classification_state == "partial");
-
-        if (bayesClassifier_->HasClassGroups()) {
-            result.group_posteriors = bayesClassifier_->PredictGroupedPosteriors(features);
-            const auto best = std::max_element(
-                result.group_posteriors.begin(), result.group_posteriors.end(),
-                [](const auto& a, const auto& b) { return a.second < b.second; });
-            if (best != result.group_posteriors.end()) {
-                result.predicted_group = best->first;
-                result.predicted_group_prob = best->second;
-            }
-        }
+        result.group_posteriors = prediction.group_probabilities;
+        result.predicted_group = prediction.predicted_group;
+        result.predicted_group_prob = prediction.predicted_group_prob;
 
         results.push_back(std::move(result));
     }

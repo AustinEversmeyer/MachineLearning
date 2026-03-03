@@ -36,8 +36,9 @@
 using SimMessage = std::variant<Proc1Message, Proc2Message>;
 
 // Parameters for synthetic data generation.
-// If model_config_path is set, per-class gaussian params from model config are
-// used for rcs/length and truth labels come from class names.
+// If model_config_path is set, per-class model distributions from the loaded
+// BayesClassifier model are used for rcs/length and truth labels come from
+// class names.
 // Otherwise global rcs/length params below are used.
 struct SyntheticParams {
     // Proc1 (rcs): drawn from Normal(rcs_mean, rcs_stddev)
@@ -57,9 +58,9 @@ struct SyntheticParams {
     std::vector<std::string> truth_labels;
 
     // Optional Bayes model config path.
-    // When set, synthetic values are sampled from per-class feature
-    // distributions parsed from model classes/features and truth labels are
-    // assigned from class names in model order.
+    // When set, synthetic values are sampled through BayesClassifier
+    // distribution objects and truth labels are assigned from class names in
+    // model order.
     std::optional<std::filesystem::path> model_config_path;
 };
 

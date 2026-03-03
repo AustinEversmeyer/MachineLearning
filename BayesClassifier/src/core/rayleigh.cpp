@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -20,6 +21,20 @@ double Rayleigh::LogPdf(double x) const {
     return -std::numeric_limits<double>::infinity();
   }
   return std::log(x) - log_sigma2_ - x * x * inv2sigma2_;
+}
+
+double Rayleigh::Sample(std::mt19937& rng) const {
+  const double u = std::generate_canonical<double, 53>(rng);
+  const double safe = std::max(1e-12, 1.0 - u);
+  return sigma_ * std::sqrt(-2.0 * std::log(safe));
+}
+
+std::string Rayleigh::TypeName() const {
+  return "rayleigh";
+}
+
+std::vector<double> Rayleigh::Params() const {
+  return {sigma_};
 }
 
 }  // namespace naive_bayes

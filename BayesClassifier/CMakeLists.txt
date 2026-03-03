@@ -10,6 +10,7 @@ add_library(naive_bayes_core
   src/core/rayleigh.cpp
   src/core/factory.cpp
   src/core/naive_bayes.cpp
+  src/core/prediction_helpers.cpp
   src/io/model_loader.cpp
   src/io/output_write.cpp
 )

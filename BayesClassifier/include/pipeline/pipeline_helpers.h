@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pipeline/prediction_helpers.h"
 #include "pipeline/pipeline_config.h"
 #include "io/json.h"
 #include "naive_bayes/naive_bayes.h"

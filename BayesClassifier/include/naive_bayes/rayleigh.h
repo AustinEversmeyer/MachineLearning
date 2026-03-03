@@ -7,6 +7,9 @@ class Rayleigh : public FeatureDistribution {
  public:
   explicit Rayleigh(double sigma);
   double LogPdf(double x) const override;
+  double Sample(std::mt19937& rng) const override;
+  std::string TypeName() const override;
+  std::vector<double> Params() const override;
 
  private:
   double sigma_;

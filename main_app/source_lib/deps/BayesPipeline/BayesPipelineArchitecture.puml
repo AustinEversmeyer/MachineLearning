@@ -10,6 +10,7 @@ left to right direction
 title BayesPipeline Architecture
 
 package "Messaging Layer" {
+  class MessageSimulator
   class TestMessageProcessor1
   class TestMessageProcessor2
 }
@@ -98,9 +99,17 @@ package "BayesPipeline" {
 
 package "BayesClassifier" {
   class NaiveBayes
+  class FeatureDistribution {
+    + Sample(rng)
+  }
+  class PipelineHelpers {
+    + RunDetailedPrediction(...)
+    + BuildFeatureInputs(...)
+  }
   class WritePredictionsCsv
 }
 
+MessageSimulator --> NaiveBayes : ClassModels() / SampleFeatureForClass(...)
 TestMessageProcessor1 --> IFeaturePublisher : publish feature
 TestMessageProcessor2 --> IFeaturePublisher : publish feature
 
@@ -112,7 +121,9 @@ BayesRuntimeManager --> BayesClassifierManager : classify
 BayesRuntimeManager --> WritePredictionsCsv : write CSV
 
 BayesClassifierManager --> FeatureAlignmentStore : align features
-BayesClassifierManager --> NaiveBayes : infer probabilities
+BayesClassifierManager --> PipelineHelpers : build prediction payload
+PipelineHelpers --> NaiveBayes : infer probabilities
+NaiveBayes --> FeatureDistribution : sample per feature
 BayesClassifierManager --> ClassificationResult : emit results
 
 FeatureAlignmentStore --> FeatureData
@@ -122,6 +133,11 @@ note right of BayesRuntimeManager
 Single worker thread drains IngestQueue.
 Each FeatureData event may trigger ClassifyIfReady().
 Model config path is provided explicitly at construction.
+end note
+
+note right of MessageSimulator
+Model-driven synthetic mode samples feature values
+through BayesClassifier distributions.
 end note
 
 note right of BayesClassifierManager

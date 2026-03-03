@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 #include "naive_bayes/distribution.h"
@@ -17,6 +18,18 @@ struct ClassDefinition {
 struct ClassGroup {
   std::string name;
   std::vector<std::string> class_names;
+};
+
+struct FeatureModelInfo {
+  std::string name;
+  std::string distribution_type;
+  std::vector<double> params;
+};
+
+struct ClassModelInfo {
+  std::string name;
+  double prior;
+  std::vector<FeatureModelInfo> features;
 };
 
 class NaiveBayes {
@@ -39,6 +52,10 @@ class NaiveBayes {
 
   std::size_t FeatureDim() const;
   const std::vector<std::string>& FeatureNames() const;
+  std::vector<ClassModelInfo> ClassModels() const;
+  double SampleFeatureForClass(std::size_t class_index,
+                               const std::string& feature_name,
+                               std::mt19937& rng) const;
 
  private:
   std::vector<double> ComputeLogJointProbabilities(const std::vector<double>& features,

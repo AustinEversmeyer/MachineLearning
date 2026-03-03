@@ -28,6 +28,7 @@ This library is built as a static library (`libbayes_pipeline.a`) and used by `m
   - Event-time feature buffering and joining.
 - `BayesClassifierManager`
   - Classification trigger/evaluation policy logic and duplicate-suppression state machine.
+  - Uses shared BayesClassifier helpers (`RunDetailedPrediction`, `BuildFeatureInputs`) so runtime and CLI emit consistent probability/group outputs.
 
 ## Data Model
 
@@ -136,6 +137,13 @@ Columns include:
 - `feature_<name>` columns
 - `predicted_class`, `predicted_prob`, `prob_*`
 - optional group columns if model groups are configured
+
+## Shared Logic Ownership
+
+- Prediction assembly (`predicted_class`, `posteriors`, grouped posteriors, best group) is owned by BayesClassifier helper APIs and reused by runtime and CLI paths.
+- Feature name/value zipping for output rows is owned by BayesClassifier helper APIs and reused by runtime and CLI paths.
+- Synthetic model-driven data generation in `main_app` loads the model with `LoadModelConfiguration`, reads class metadata through `NaiveBayes::ClassModels()`, and samples feature values through `NaiveBayes::SampleFeatureForClass(...)`.
+- Sampling behavior is owned by BayesClassifier distribution objects (`FeatureDistribution::Sample`), so simulator support follows whatever model distribution types BayesClassifier implements (for example: gaussian, rayleigh).
 
 ## Build
 

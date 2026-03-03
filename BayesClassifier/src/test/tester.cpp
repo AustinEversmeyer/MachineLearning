@@ -492,6 +492,130 @@ void TestCsvFeatureInputsAndIdColumns() {
     }
 }
 
+void TestDetailedPredictionHelperAndFeatureZip() {
+    std::cout << "[Test] Shared detailed prediction helper and feature zip..." << std::endl;
+
+    naive_bayes::NaiveBayes clf(naive_bayes::ProbabilitySpace::kLog);
+
+    naive_bayes::ClassDefinition classA;
+    classA.name = "A";
+    classA.prior = 0.5;
+    classA.feature_names = {"x"};
+    classA.feature_models.push_back(std::make_unique<naive_bayes::Gaussian>(0.0, 1.0));
+
+    naive_bayes::ClassDefinition classB;
+    classB.name = "B";
+    classB.prior = 0.5;
+    classB.feature_names = {"x"};
+    classB.feature_models.push_back(std::make_unique<naive_bayes::Gaussian>(5.0, 1.0));
+
+    clf.AddClassDefinition(std::move(classA));
+    clf.AddClassDefinition(std::move(classB));
+    clf.SetClassGroups({{"Left", {"A"}}, {"Right", {"B"}}});
+
+    const std::vector<double> features = {0.0};
+    const naive_bayes::pipeline::DetailedPrediction detailed =
+        naive_bayes::pipeline::RunDetailedPrediction(clf, features);
+    if (detailed.predicted_class != "A") {
+        throw std::runtime_error("DetailedPrediction helper returned wrong class");
+    }
+    if (detailed.probabilities.size() != 2) {
+        throw std::runtime_error("DetailedPrediction helper missing class posteriors");
+    }
+    if (detailed.group_probabilities.size() != 2) {
+        throw std::runtime_error("DetailedPrediction helper missing grouped posteriors");
+    }
+    if (detailed.predicted_group.empty()) {
+        throw std::runtime_error("DetailedPrediction helper missing predicted group");
+    }
+
+    const std::vector<std::pair<std::string, double>> zipped =
+        naive_bayes::pipeline::BuildFeatureInputs({"x"}, features);
+    if (zipped.size() != 1 || zipped[0].first != "x" || zipped[0].second != 0.0) {
+        throw std::runtime_error("BuildFeatureInputs returned unexpected content");
+    }
+
+    bool threw = false;
+    try {
+        (void)naive_bayes::pipeline::BuildFeatureInputs({"x", "y"}, features);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    if (!threw) {
+        throw std::runtime_error("BuildFeatureInputs should throw on name/value mismatch");
+    }
+}
+
+void TestClassModelIntrospection() {
+    std::cout << "[Test] NaiveBayes class model introspection..." << std::endl;
+
+    std::filesystem::path tmp = std::filesystem::temp_directory_path() / "nb_class_model_introspection.json";
+    std::ofstream out(tmp);
+    out << R"({
+      "classes": [
+        {
+          "name": "ClassA",
+          "prior": 0.6,
+          "features": [
+            { "name": "rcs", "type": "gaussian", "params": { "mean": 2.0, "sigma": 0.5 } },
+            { "name": "length", "type": "gaussian", "params": { "mean": 3.0, "sigma": 0.4 } }
+          ]
+        },
+        {
+          "name": "ClassB",
+          "prior": 0.4,
+          "features": [
+            { "name": "rcs", "type": "gaussian", "params": { "mean": 6.0, "sigma": 1.2 } },
+            { "name": "length", "type": "gaussian", "params": { "mean": 7.0, "sigma": 0.9 } }
+          ]
+        }
+      ]
+    })";
+    out.close();
+
+    const naive_bayes::NaiveBayes model = naive_bayes::io::LoadModelConfiguration(tmp);
+    const std::vector<naive_bayes::ClassModelInfo> classes = model.ClassModels();
+    if (classes.size() != 2) {
+        throw std::runtime_error("Expected 2 class models from introspection");
+    }
+    if (classes[0].features.size() != 2 || classes[1].features.size() != 2) {
+        throw std::runtime_error("Expected 2 features per class in introspection");
+    }
+    if (classes[0].features[0].distribution_type != "gaussian") {
+        throw std::runtime_error("Expected gaussian distribution type in introspection");
+    }
+    if (classes[0].features[0].params.size() != 2) {
+        throw std::runtime_error("Expected gaussian params [mean,sigma]");
+    }
+}
+
+void TestSampleFeatureForClassSupportsRayleigh() {
+    std::cout << "[Test] Sampling from class feature supports rayleigh..." << std::endl;
+
+    std::filesystem::path tmp = std::filesystem::temp_directory_path() / "nb_sample_rayleigh_test.json";
+    std::ofstream out(tmp);
+    out << R"({
+      "classes": [
+        {
+          "name": "ClassA",
+          "prior": 1.0,
+          "features": [
+            { "name": "rcs", "type": "gaussian", "params": { "mean": 2.0, "sigma": 0.5 } },
+            { "name": "length", "type": "rayleigh", "params": { "sigma": 3.0 } }
+          ]
+        }
+      ]
+    })";
+    out.close();
+
+    const naive_bayes::NaiveBayes model = naive_bayes::io::LoadModelConfiguration(tmp);
+    std::mt19937 rng(7);
+    const double sampled_length = model.SampleFeatureForClass(0, "length", rng);
+    if (!(sampled_length > 0.0)) {
+        throw std::runtime_error("Expected positive rayleigh sample for length");
+    }
+}
+
 } // namespace
 
 int RunTestSuite() {
@@ -565,6 +689,27 @@ int RunTestSuite() {
         TestCsvFeatureInputsAndIdColumns();
     } catch (const std::exception& ex) {
         std::cerr << "!!! FEATURE/ID CSV OUTPUT TEST FAILED: " << ex.what() << "\n";
+        failures++;
+    }
+
+    try {
+        TestDetailedPredictionHelperAndFeatureZip();
+    } catch (const std::exception& ex) {
+        std::cerr << "!!! SHARED HELPER TEST FAILED: " << ex.what() << "\n";
+        failures++;
+    }
+
+    try {
+        TestClassModelIntrospection();
+    } catch (const std::exception& ex) {
+        std::cerr << "!!! CLASS MODEL INTROSPECTION TEST FAILED: " << ex.what() << "\n";
+        failures++;
+    }
+
+    try {
+        TestSampleFeatureForClassSupportsRayleigh();
+    } catch (const std::exception& ex) {
+        std::cerr << "!!! FEATURE SAMPLING TEST FAILED: " << ex.what() << "\n";
         failures++;
     }
 

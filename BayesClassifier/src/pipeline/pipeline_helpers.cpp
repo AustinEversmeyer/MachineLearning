@@ -57,46 +57,15 @@ JsonPredictionInputs ExtractJsonInputs(const LayoutConfig& layout,
   return inputs;
 }
 
-SinglePrediction RunPredictionResult(const NaiveBayes& clf,
-                                     const std::vector<double>& features) {
-  auto pick_best = [](const std::vector<std::pair<std::string, double>>& entries) {
-    if (entries.empty()) {
-      throw std::logic_error("No probabilities available");
-    }
-    auto best = std::max_element(
-        entries.begin(),
-        entries.end(),
-        [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
-    return *best;
-  };
-
+SinglePrediction ToSinglePrediction(const DetailedPrediction& detailed_prediction) {
   SinglePrediction result;
-  result.probabilities = clf.PredictPosteriors(features);
-  std::pair<std::string, double> prediction = clf.PredictClass(features);
-  result.predicted_class = prediction.first;
-  result.predicted_prob = prediction.second;
-  if (clf.HasClassGroups()) {
-    result.group_probabilities = clf.PredictGroupedPosteriors(features);
-    std::pair<std::string, double> group_prediction = pick_best(result.group_probabilities);
-    result.predicted_group = group_prediction.first;
-    result.predicted_group_prob = group_prediction.second;
-  }
+  result.predicted_class = detailed_prediction.predicted_class;
+  result.predicted_prob = detailed_prediction.predicted_prob;
+  result.probabilities = detailed_prediction.probabilities;
+  result.predicted_group = detailed_prediction.predicted_group;
+  result.predicted_group_prob = detailed_prediction.predicted_group_prob;
+  result.group_probabilities = detailed_prediction.group_probabilities;
   return result;
-}
-
-std::vector<std::pair<std::string, double>> BuildFeatureInputs(
-    const std::vector<std::string>& feature_names,
-    const std::vector<double>& features) {
-  if (feature_names.size() != features.size()) {
-    throw std::runtime_error("Feature name/value count mismatch while building output row");
-  }
-
-  std::vector<std::pair<std::string, double>> feature_inputs;
-  feature_inputs.reserve(feature_names.size());
-  for (std::size_t i = 0; i < feature_names.size(); ++i) {
-    feature_inputs.emplace_back(feature_names[i], features[i]);
-  }
-  return feature_inputs;
 }
 
 }  // namespace
@@ -116,7 +85,7 @@ std::vector<BatchPredictionRow> RunInference(const NaiveBayes& clf,
   std::vector<BatchPredictionRow> prediction_rows;
   prediction_rows.reserve(observations.size());
   for (const Observation& observation : observations) {
-    SinglePrediction result = RunPredictionResult(clf, observation.features);
+    DetailedPrediction result = RunDetailedPrediction(clf, observation.features);
 
     BatchPredictionRow row;
     row.time_ns = static_cast<int64_t>(std::llround(observation.timestep * kNsPerSecond));
@@ -144,7 +113,7 @@ void PrintSinglePrediction(const NaiveBayes& clf,
     return;
   }
 
-  SinglePrediction result = RunPredictionResult(clf, features_to_use);
+  DetailedPrediction result = RunDetailedPrediction(clf, features_to_use);
 
   std::cout << std::fixed << std::setprecision(6);
   std::cout << "Single prediction result:\n";
@@ -172,14 +141,15 @@ SinglePrediction PredictResultFromJsonObject(const NaiveBayes& clf,
                                              const LayoutConfig& layout,
                                              const naive_bayes::io::Json& json_obj) {
   JsonPredictionInputs inputs = ExtractJsonInputs(layout, json_obj);
-  return RunPredictionResult(clf, inputs.features);
+  DetailedPrediction detailed = RunDetailedPrediction(clf, inputs.features);
+  return ToSinglePrediction(detailed);
 }
 
 BatchPredictionRow PredictFromJsonObject(const NaiveBayes& clf,
                                          const LayoutConfig& layout,
                                          const naive_bayes::io::Json& json_obj) {
   JsonPredictionInputs inputs = ExtractJsonInputs(layout, json_obj);
-  SinglePrediction result = RunPredictionResult(clf, inputs.features);
+  DetailedPrediction result = RunDetailedPrediction(clf, inputs.features);
   const std::vector<std::string>& feature_names = clf.FeatureNames();
 
   BatchPredictionRow row;
