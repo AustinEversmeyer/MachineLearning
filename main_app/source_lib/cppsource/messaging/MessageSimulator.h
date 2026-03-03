@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <random>
 #include <variant>
 #include <vector>
@@ -34,7 +35,10 @@
 // A tagged union covering all message types the sim can inject.
 using SimMessage = std::variant<Proc1Message, Proc2Message>;
 
-// Parameters for synthetic data generation (one set per proc type).
+// Parameters for synthetic data generation.
+// If model_config_path is set, per-class gaussian params from model config are
+// used for rcs/length and truth labels come from class names.
+// Otherwise global rcs/length params below are used.
 struct SyntheticParams {
     // Proc1 (rcs): drawn from Normal(rcs_mean, rcs_stddev)
     double rcs_mean   = 5.0;
@@ -47,6 +51,16 @@ struct SyntheticParams {
     // Simulated jitter: proc2 timestamps are offset by a small random
     // amount in [-time_jitter, +time_jitter] seconds.
     double time_jitter = 0.2;
+
+    // Optional truth labels assigned by target id index.
+    // If empty, defaults are used: TargetSmall, TargetMedium, TargetLarge.
+    std::vector<std::string> truth_labels;
+
+    // Optional Bayes model config path.
+    // When set, synthetic values are sampled from per-class feature
+    // distributions parsed from model classes/features and truth labels are
+    // assigned from class names in model order.
+    std::optional<std::filesystem::path> model_config_path;
 };
 
 class MessageSimulator {

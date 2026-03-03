@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <optional>
 
 TestMessageProcessor2::TestMessageProcessor2(BayesPipeline::IFeaturePublisher& publisher)
     : publisher_(publisher)

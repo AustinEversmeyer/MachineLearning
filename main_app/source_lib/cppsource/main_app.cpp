@@ -22,14 +22,17 @@ MainApp::~MainApp() = default;
 
 void MainApp::Run() {
     myBayesRuntimeManager->Start();
+    const std::filesystem::path model_config_path = "deps/BayesPipeline/config/model/implementation.model.json";
 
-    mySimulator->GenerateSynthetic(/*num_ids=*/3, /*num_steps=*/10,
+    mySimulator->GenerateSynthetic(/*num_ids=*/3, /*num_steps=*/1000,
                                    /*proc1_time_step=*/1.0,
                                    /*proc2_time_step=*/5.0,
                                    SyntheticParams{
                                        .rcs_mean    = 5.0, .rcs_stddev  = 1.5,
                                        .len_mean    = 3.0, .len_stddev  = 0.8,
-                                       .time_jitter = 0.2
+                                       .time_jitter = 0.2,
+                                       .truth_labels = {},
+                                       .model_config_path = model_config_path
                                    });
 
     mySimulator->Run();
