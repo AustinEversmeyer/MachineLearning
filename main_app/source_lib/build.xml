@@ -94,8 +94,17 @@
     </exec>
   </target>
 
+  <!-- Target: build deterministic scenario test executable. -->
+  <target name="scenario-tests" depends="bayes-pipeline">
+    <exec executable="make" failonerror="true" dir="${basedir}">
+      <arg value="scenario_tests"/>
+      <arg value="BAYES_LIB_DIR=${bayes.build.dir}"/>
+      <arg value="BAYES_INCLUDE_DIR=${bayes.include.dir}"/>
+    </exec>
+  </target>
+
   <!-- Default target alias; runs full compile pipeline through dependencies. -->
-  <target name="all" depends="compile"/>
+  <target name="all" depends="compile,scenario-tests"/>
 
   <!-- Cleanup target for all generated outputs in this module. -->
   <target name="clean">

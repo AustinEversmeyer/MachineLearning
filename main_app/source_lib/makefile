@@ -15,8 +15,9 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -fPIC
 
 # Root source directory for this project.
 SRCDIR   := cppsource
-# Output directory for object files.
-OBJDIR   := obj
+# Output directories for generated artifacts.
+BUILDDIR := build
+OBJDIR   := $(BUILDDIR)/obj
 
 # Path to BayesClassifier build outputs.
 # ?= means callers can override this variable (Ant does this).
@@ -47,21 +48,28 @@ LIB_OBJS += $(OBJDIR)/TestMessageProcessor1.o
 LIB_OBJS += $(OBJDIR)/TestMessageProcessor2.o
 
 # Output shared library name.
-TARGETLIB := libsource_lib.so
+TARGETLIB := $(BUILDDIR)/libsource_lib.so
 # Output executable name.
-TARGETAPP := main_app
+TARGETAPP := $(BUILDDIR)/main_app
 # Output deterministic scenario test executable.
-TARGETSCENARIO := scenario_tests
+TARGETSCENARIO := $(BUILDDIR)/scenario_tests
 
 # Declare pseudo-targets that do not map to real files.
-.PHONY: all clean DIRS
+.PHONY: all clean DIRS main_app scenario_tests libsource_lib
 
 # Default build target: produce both shared library and executable.
 all: $(TARGETLIB) $(TARGETAPP)
 
+# Compatibility aliases to keep old target names working.
+main_app: $(TARGETAPP)
+
+scenario_tests: $(TARGETSCENARIO)
+
+libsource_lib: $(TARGETLIB)
+
 # Utility target: ensure object directory exists before compiling.
 DIRS:
-	@mkdir -p $(OBJDIR)
+	@mkdir -p $(BUILDDIR) $(OBJDIR)
 
 # Link shared library from local objects plus both static dependency libs.
 # whole-archive is used so required objects are not discarded by the linker.
@@ -118,4 +126,4 @@ $(OBJDIR)/TestMessageProcessor2.o: $(SRCDIR)/messaging/TestMessageProcessor2.cpp
 
 # Remove generated objects and primary build outputs.
 clean:
-	rm -rf $(OBJDIR) $(TARGETLIB) $(TARGETAPP) $(TARGETSCENARIO)
+	rm -rf $(BUILDDIR) obj libsource_lib.so main_app scenario_tests
