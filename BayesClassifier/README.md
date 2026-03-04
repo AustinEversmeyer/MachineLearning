@@ -100,7 +100,7 @@ Controls input/output paths and data layout.
 Use named fields to map input columns/keys onto the model’s feature order.
 
   * `feature_fields`: **Crucial.** This array defines the order in which named keys are fed into the classifier. In the example below, the classifier expects Feature 0 to be "temperature" and Feature 1 to be "pressure".
-  * `output_use_index` (optional): When true, the CSV uses a 0-based `index` column instead of `time_step`. Useful if your input rows are stacked segments rather than chronological timesteps.
+  * `output_use_index` (optional): When true, timesteps are assigned as a 0-based row index rather than read from the input. Useful if your input rows are stacked segments rather than chronological timesteps. The output column is always `time_ns` regardless of this setting.
 
 <!-- end list -->
 
@@ -359,8 +359,8 @@ The analysis script `tools/analyze_predictions.py` reads a prediction CSV and wr
   * `confusion_matrix_raw.png`: raw counts of true vs. predicted labels
   * `confusion_matrix_normalized.png`: row-normalized (each true class sums to 1)
   * `confusion_counts.png`: overall correct vs. incorrect (or TP/TN/FP/FN for binary)
-  * `confusion_counts_binary_good_bad.png`: optional “good vs bad” collapse if
-    `DEFAULT_GOOD_CLASSES` is set
+  * `confusion_counts_binary_critical_noncritical.png`: binary collapse of all classes into
+    “critical” vs “non-critical” — only produced when `DEFAULT_CRITICAL_CLASSES` is set
 
 * **`top_misclassifications.csv`**
   If probability columns are present, this lists the **most confident wrong predictions**.
@@ -369,6 +369,62 @@ The analysis script `tools/analyze_predictions.py` reads a prediction CSV and wr
   * Data quality review
   * Label audits
   * Threshold tuning or recalibration
+
+---
+
+## Binary Critical / Non-Critical Analysis
+
+When `DEFAULT_CRITICAL_CLASSES` is set in `analyze_predictions.py` (default: `["TargetSmall"]`),
+the script runs a second analysis pass that **collapses the multi-class problem into two buckets**:
+every truth label and prediction is either *critical* (in the list) or *non-critical* (everything else).
+This isolates how well the classifier handles the operationally important class regardless of overall
+multi-class accuracy.
+
+### Output: `binary_critical_noncritical` in `metrics_summary.json`
+
+```json
+"binary_critical_noncritical": {
+  "positives": ["TargetSmall"],
+  "counts": { "tp": ..., "tn": ..., "fp": ..., "fn": ... },
+  "precision": ...,
+  "recall": ...,
+  "f1": ...,
+  "accuracy": ...
+}
+```
+
+### Count Definitions
+
+| Count | Truth label | Predicted label | Meaning |
+|---|---|---|---|
+| **TP** | critical | critical | Correctly detected a critical target |
+| **TN** | non-critical | non-critical | Correctly dismissed a non-critical target |
+| **FP** | non-critical | critical | False alarm — non-critical target called critical |
+| **FN** | critical | non-critical | **Missed detection** — critical target went undetected |
+
+### Derived Metrics
+
+| Metric | Formula | What it answers |
+|---|---|---|
+| **Recall** | TP / (TP + FN) | Of all actual critical targets, what fraction were caught? |
+| **Precision** | TP / (TP + FP) | Of all critical predictions, what fraction were correct? |
+| **F1** | harmonic mean of precision & recall | Balanced score when both matter |
+| **Accuracy** | (TP + TN) / total | Overall binary correctness |
+
+### How to Interpret
+
+**Focus on recall first.** A missed critical target (FN) is typically the most dangerous failure
+mode. If recall is low, the model is regularly failing to detect the targets that matter most.
+
+**Then check precision.** A high false-alarm rate (low precision) means non-critical targets are
+frequently mislabeled as critical, which reduces trust in detections.
+
+**Be cautious with accuracy.** If critical targets are rare in the dataset, accuracy will appear
+high even when recall is poor — the model can predict non-critical for nearly every row and still
+score well. Prefer recall and F1 as the primary indicators.
+
+**`DEFAULT_CRITICAL_CLASSES` accepts multiple entries** (e.g. `["TargetSmall", "TargetMedium"]`),
+in which case all listed classes together form the positive side of the binary split.
 
 ---
 
