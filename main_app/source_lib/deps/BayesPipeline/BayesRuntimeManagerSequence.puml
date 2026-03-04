@@ -1,0 +1,76 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+
+title BayesRuntimeManager: Lifecycle and Message Flow
+
+participant "Caller" as C
+participant "BayesRuntimeManager\n(caller thread)" as BRM
+participant "IngestQueue" as Q
+participant "BayesRuntimeManager\n(worker thread)" as W
+participant "BayesClassifierManager" as BCM
+
+== Construction ==
+
+C -> BRM : BayesRuntimeManager(runtime_config_path, model_config_path)
+activate BRM
+note over BRM : Validates config path.\nInitializes BayesClassifierManager\n(loads model + FeatureAlignmentStore).
+BRM --> C
+deactivate BRM
+
+== Start ==
+
+C -> BRM : Start()
+activate BRM
+note over BRM : Clears written_rows_.\nSpawns worker thread → Run().
+BRM --> C
+deactivate BRM
+
+activate W #LightGray
+note over W : Blocks on queue_.Pop()
+
+== Feature Publishing (Caller Thread) ==
+
+C -> BRM : PublishFeature(FeatureData)
+activate BRM
+BRM -> Q : Push(FeatureData)
+note right of Q : Non-blocking;\ndecouples caller\nfrom worker thread
+BRM --> C
+deactivate BRM
+
+== Worker Thread: Run() Loop ==
+
+loop while queue not closed
+
+    Q -> W : Pop(event) unblocks
+
+    W -> BCM : RecordFeatureSample(event)
+    activate BCM
+    note over BCM : Stores feature value and\ntruth_label (if present) by id.
+    BCM --> W
+    deactivate BCM
+
+    W -> BCM : ClassifyIfReady()
+    activate BCM
+    note over BCM : Checks EvaluationPolicy, aligns features\nper track, applies EmissionState +\nPartialPolicy logic, runs NaiveBayes.\n(see BayesClassifyActivityFlow diagram)
+    BCM --> W : results (may be empty)
+    deactivate BCM
+
+    note over W : Converts each ClassificationResult\nto BatchPredictionRow → written_rows_
+
+end
+
+deactivate W
+
+== Stop ==
+
+C -> BRM : Stop()
+activate BRM
+BRM -> Q : Close()
+note right of Q : Unblocks Pop() in worker\nthread, ending the loop
+note over BRM : worker_.join()\nWritePredictionsCsv(output_file_, written_rows_)
+BRM --> C
+deactivate BRM
+
+@enduml

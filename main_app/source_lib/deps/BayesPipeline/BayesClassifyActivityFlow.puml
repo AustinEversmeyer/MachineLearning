@@ -1,0 +1,68 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam activityDiamondBackgroundColor white
+skinparam activityBackgroundColor white
+
+title BayesClassifierManager: ClassifyIfReady() and Classify() Logic
+
+start
+
+:ClassifyIfReady() called;
+
+if (ShouldEvaluate(evaluation_policy_, last_event_feature_)?) then (no)
+  :return false;
+  stop
+else (yes)
+endif
+
+:BuildJoinedFeatureVectors(allow_partial);
+note right
+  One entry per tracked id in the store.
+  allow_partial = (partial_policy != kDisallow).
+  Missing features stored as NaN.
+end note
+
+while (more tracked ids?) is (yes)
+
+  if (already emitted for this id + anchor_time?) then (yes)
+    :skip;
+  else (no)
+
+    if (rec.is_partial?) then (no — full vector)
+      :emit_row = true;
+      :classification_state = "full";
+    else (yes — partial vector)
+
+      switch (partial_policy)
+      case (kDisallow)
+        :skip;
+      case (kAlwaysAllow)
+        :emit_row = true;
+        :classification_state = "partial";
+      case (kAllowAfterDeadline)
+        if (last_event_time_ns >= anchor_time_ns + grace_window?) then (yes)
+          :emit_row = true;
+          :classification_state = "partial";
+        else (no)
+          :skip — grace window not elapsed;
+        endif
+      endswitch
+
+    endif
+
+    if (emit_row?) then (yes)
+      :Build feature vector in model order\n(NaN for missing entries);
+      :RunDetailedPrediction(NaiveBayes, features);
+      :Build ClassificationResult and append to results;
+    endif
+
+  endif
+
+endwhile (no)
+
+:return results (empty → false, non-empty → true);
+
+stop
+
+@enduml
